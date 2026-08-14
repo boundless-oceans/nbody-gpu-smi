@@ -1,0 +1,42 @@
+# Build 产物
+build/
+bin/
+obj/
+*.o
+*.a
+*.so
+*.so.*
+*.cu.o
+*.cuda.o
+*.out
+
+# 可执行文件
+nbody
+nbody-gpu-smi
+
+# CMake 生成
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CMakeOutput.log
+CMakeError.log
+Makefile
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+
+# IDE / 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统 / 临时
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+
+# 日志
+*.log
