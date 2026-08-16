@@ -44,3 +44,6 @@ Thumbs.db
 # ImGui 运行时布局配置（自动生成，勿提交）
 imgui.ini
 imgui.ini.*
+
+# 第三方依赖源码（CMake 缺失时自动 FetchContent 下载，不入库）
+third_party/
