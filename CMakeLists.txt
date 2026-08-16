@@ -84,10 +84,11 @@ set(PHYSICS_INCLUDE_DIRS
 )
 
 # ======================================================
-# GUI 可执行文件（S1 工程骨架：GLFW + ImGui 面板）
+# GUI 可执行文件（S1 工程骨架 + S3-1 Interop 验证）
 # ======================================================
 add_executable(nbody
     src/main.cpp
+    src/render/interop_buffer.cpp       # S3-1: CUDA-GL Interop 缓冲
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_demo.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
@@ -101,6 +102,7 @@ target_include_directories(nbody PRIVATE
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
     ${PHYSICS_INCLUDE_DIRS}
+    ${CUDAToolkit_INCLUDE_DIRS}         # .cpp 编译需显式 CUDA 头文件路径
 )
 
 # 编译选项
@@ -117,30 +119,34 @@ target_link_libraries(nbody PRIVATE
     OpenGL::GL
     GLEW::GLEW
     ${GLFW_LIBS}
+    CUDA::cudart                        # S3-1: CUDA Runtime API
 )
 
 # ======================================================
-# Benchmark 可执行文件（S2 验证点：无窗口物理性能）
-# 用法: ./nbody_benchmark [numBodies] [iterations]
+# Benchmark 可执行文件
+# S2: 无窗口物理性能基准
+# S3-2: --pbo 模式（经隐藏 GL 上下文创建 InteropBuffer）
+# 用法: ./nbody_benchmark [numBodies] [iterations] [--pbo]
 # ======================================================
 add_executable(nbody_benchmark
     src/benchmark.cpp
+    src/render/interop_buffer.cpp       # S3-2: PBO 模式经 InteropBuffer
     ${PHYSICS_SOURCES}
 )
 
 target_include_directories(nbody_benchmark PRIVATE
     ${PHYSICS_INCLUDE_DIRS}
-    ${CUDAToolkit_INCLUDE_DIRS}   # .cpp 编译需显式 CUDA 头文件路径（vector_types.h 等）
+    ${CUDAToolkit_INCLUDE_DIRS}         # .cpp 编译需显式 CUDA 头文件路径
 )
 
 target_compile_options(nbody_benchmark PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra>
 )
 
-target_compile_definitions(nbody_benchmark PRIVATE
-    CUDA_ARCHITECTURES_CURRENT="${CMAKE_CUDA_ARCHITECTURES}"
-)
-
+# S3-2: PBO 模式需要 GL 上下文（隐藏 GLFW 窗口 + GLEW + OpenGL）
 target_link_libraries(nbody_benchmark PRIVATE
     CUDA::cudart
+    OpenGL::GL
+    GLEW::GLEW
+    ${GLFW_LIBS}
 )
