@@ -40,3 +40,7 @@ Thumbs.db
 
 # 日志
 *.log
+
+# ImGui 运行时布局配置（自动生成，勿提交）
+imgui.ini
+imgui.ini.*
