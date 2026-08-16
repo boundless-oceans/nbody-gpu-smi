@@ -12,6 +12,10 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
 endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CUDA_SEPARABLE_COMPILATION OFF)
+
+# CUDA Toolkit（提供 CUDA::cudart 等 targets）
+find_package(CUDAToolkit REQUIRED)
 
 # ======================================================
 # 依赖检查：OpenGL（系统自带，一般都有）
@@ -69,7 +73,18 @@ else()
 endif()
 
 # ======================================================
-# 可执行文件
+# 物理模块源（CUDA 内核 + 头文件）
+# ======================================================
+set(PHYSICS_SOURCES
+    src/physics/body_system_cuda_kernel.cu
+)
+
+set(PHYSICS_INCLUDE_DIRS
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+# ======================================================
+# GUI 可执行文件（S1 工程骨架：GLFW + ImGui 面板）
 # ======================================================
 add_executable(nbody
     src/main.cpp
@@ -85,6 +100,7 @@ add_executable(nbody
 target_include_directories(nbody PRIVATE
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
+    ${PHYSICS_INCLUDE_DIRS}
 )
 
 # 编译选项
@@ -101,4 +117,30 @@ target_link_libraries(nbody PRIVATE
     OpenGL::GL
     GLEW::GLEW
     ${GLFW_LIBS}
+)
+
+# ======================================================
+# Benchmark 可执行文件（S2 验证点：无窗口物理性能）
+# 用法: ./nbody_benchmark [numBodies] [iterations]
+# ======================================================
+add_executable(nbody_benchmark
+    src/benchmark.cpp
+    ${PHYSICS_SOURCES}
+)
+
+target_include_directories(nbody_benchmark PRIVATE
+    ${PHYSICS_INCLUDE_DIRS}
+    ${CUDAToolkit_INCLUDE_DIRS}   # .cpp 编译需显式 CUDA 头文件路径（vector_types.h 等）
+)
+
+target_compile_options(nbody_benchmark PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra>
+)
+
+target_compile_definitions(nbody_benchmark PRIVATE
+    CUDA_ARCHITECTURES_CURRENT="${CMAKE_CUDA_ARCHITECTURES}"
+)
+
+target_link_libraries(nbody_benchmark PRIVATE
+    CUDA::cudart
 )
