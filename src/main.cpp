@@ -24,18 +24,7 @@ static void glfwErrorCallback(int error, const char* description)
     std::fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
 
-// 检查 OpenGL 错误
-static bool checkGLError(const char* tag)
-{
-    GLenum err = glGetError();
-    if (err != GL_NO_ERROR) {
-        std::fprintf(stderr, "OpenGL Error [%s]: 0x%04X\n", tag, err);
-        return false;
-    }
-    return true;
-}
-
-int main(int argc, char** argv)
+int main()
 {
     // --------------------------------
     // 1. 初始化 GLFW
