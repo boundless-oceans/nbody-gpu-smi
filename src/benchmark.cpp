@@ -31,6 +31,10 @@
  * 用法: ./nbody_benchmark [numBodies] [iterations] [--pbo]
  */
 
+// GLEW 必须在任何可能引入 OpenGL 的头文件之前包含（含 cuda_gl_interop.h）
+#include <GL/glew.h>
+#include <GLFW/glfw3.h>
+
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -62,9 +66,6 @@ void computePerfStats(int numBodies, int iterations, float milliseconds, double&
 // S3-2: 在隐藏 GL 窗口上下文下创建 InteropBuffer
 // （PBO 属于 GL 资源，需要 GL context 才能创建）
 // =============================================
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
-
 static bool initHiddenGLContext()
 {
     if (!glfwInit()) {
