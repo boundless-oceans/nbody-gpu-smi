@@ -16,6 +16,8 @@
 #include <imgui_impl_opengl3.h>
 
 #include <cstdio>
+#include <cstring>
+#include <string>
 #include <vector>
 
 #include "render/interop_buffer.h"

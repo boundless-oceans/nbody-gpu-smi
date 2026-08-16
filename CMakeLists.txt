@@ -88,6 +88,7 @@ set(PHYSICS_INCLUDE_DIRS
 # ======================================================
 add_executable(nbody
     src/main.cpp
+    src/render/interop_buffer.cpp       # S3-1: CUDA-GL Interop 缓冲
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_demo.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
@@ -101,6 +102,7 @@ target_include_directories(nbody PRIVATE
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
     ${PHYSICS_INCLUDE_DIRS}
+    ${CUDAToolkit_INCLUDE_DIRS}         # .cpp 编译需显式 CUDA 头文件路径（cuda_runtime.h 等）
 )
 
 # 编译选项
@@ -117,6 +119,7 @@ target_link_libraries(nbody PRIVATE
     OpenGL::GL
     GLEW::GLEW
     ${GLFW_LIBS}
+    CUDA::cudart                        # S3-1: CUDA Runtime API（cudaMemcpy/cudaGraphics*）
 )
 
 # ======================================================
