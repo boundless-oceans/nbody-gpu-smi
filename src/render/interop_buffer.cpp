@@ -129,3 +129,15 @@ void InteropBuffer::unmapFromCuda()
     // 解锁 PBO，归还给 GL 使用
     checkCudaError(cudaGraphicsUnmapResources(1, &m_cudaResource, 0), "cudaGraphicsUnmapResources");
 }
+
+void InteropBuffer::getMappedDevicePointer(void** devicePtr, size_t* bytes) const
+{
+    if (!m_bValid || !m_cudaResource) {
+        std::fprintf(stderr, "[InteropBuffer] getMappedDevicePointer called on invalid buffer\n");
+        std::exit(EXIT_FAILURE);
+    }
+
+    // 返回 CUDA 映射后的设备指针（仅 mapForCuda 之后有效）
+    checkCudaError(cudaGraphicsResourceGetMappedPointer(devicePtr, bytes, m_cudaResource),
+                   "cudaGraphicsResourceGetMappedPointer");
+}

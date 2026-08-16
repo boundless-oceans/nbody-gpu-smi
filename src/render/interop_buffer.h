@@ -47,11 +47,14 @@ public:
     InteropBuffer(const InteropBuffer&)            = delete;
     InteropBuffer& operator=(const InteropBuffer&) = delete;
 
-    // 锁定 PBO 供 CUDA 映射访问（返回可直接写的设备指针）
+    // 锁定 PBO 供 CUDA 映射访问（返回资源句柄）
     cudaGraphicsResource* mapForCuda();
 
     // 解锁 PBO（CUDA 写完后必须调用，GL 才能安全读取）
     void unmapFromCuda();
+
+    // 在 mapForCuda 之后调用：获取可直接读写的设备指针与字节数
+    void getMappedDevicePointer(void** devicePtr, size_t* bytes) const;
 
     // 查询：PBO 句柄 / 粒子数 / 每粒子字节数
     unsigned int getPBO() const { return m_pbo; }
