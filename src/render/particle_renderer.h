@@ -49,6 +49,10 @@ public:
     // pbo: OpenGL PBO 句柄；numParticles: 粒子数
     void setPBO(unsigned int pbo, unsigned int numParticles);
 
+    // 设置质量映射基准（log 归一化用）：粒子质量最大值
+    // 质量越接近 maxMass → 颜色越红、粒子越大
+    void setMaxMass(float maxMass);
+
     // 渲染一帧（绑定 PBO 数据 → GL_POINTS 绘制 → 解绑）
     void render();
 
@@ -62,6 +66,7 @@ private:
     unsigned int m_pbo;        // 当前绑定的 PBO（0 = 未设置）
     unsigned int m_numParticles;
     float        m_pointScale;  // 点大小缩放（视距相关，S3-3 固定值）
+    float        m_maxMass;     // 质量映射基准（S5，log 归一化）
 };
 
 #endif  // NBODY_RENDER_PARTICLE_RENDERER_H

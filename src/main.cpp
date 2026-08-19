@@ -122,14 +122,28 @@ int main()
                     NUM_BODIES,
                     true);
 
+    // ---- S5: 非均匀质量（核心物理风格）----
+    // 前 1% 粒子设为"大质量体"，其余保持小质量
+    // 质量存在每个粒子的 float4.w，物理解算直接使用
+    const int numHeavy = NUM_BODIES / 100;
+    float     maxMass  = 1.0f;
+    for (int i = 0; i < NUM_BODIES; ++i) {
+        if (i < numHeavy) {
+            hPos[i * 4 + 3] = 100.0f + 100.0f * (float)i / numHeavy;  // 100 ~ 200
+            maxMass = hPos[i * 4 + 3];
+        }
+    }
+
     system.setArray(BODYSYSTEM_POSITION, hPos.data());
     system.setArray(BODYSYSTEM_VELOCITY, hVel.data());
 
     // --------------------------------
-    // 5. 创建粒子渲染器（绑定 CUDA 写好的 PBO）
+    // 5. 创建粒子渲染器（绑定 CUDA 写好的 PBO + 质量映射）
     // --------------------------------
     ParticleRenderer renderer;
     renderer.setPBO(system.getCurrentReadPBO(), system.getNumBodies());
+    renderer.setMaxMass(maxMass);
+    printf("[S5] 质量范围: 1.0 ~ %.1f（%d 个大质量体）\n", maxMass, numHeavy);
 
     // 运行状态
     bool  paused  = false;
@@ -164,6 +178,7 @@ int main()
         ImGui::BulletText("粒子数: %u", system.getNumBodies());
         ImGui::BulletText("模拟时间: %.2f s", simTime);
         ImGui::BulletText("PBO 渲染: %s", system.usesPBO() ? "ON" : "OFF");
+        ImGui::BulletText("S5 质量映射: 蓝(轻) → 红(重)");
         ImGui::BulletText("状态: %s", paused ? "暂停(空格继续)" : "运行中(空格暂停)");
         ImGui::Separator();
 

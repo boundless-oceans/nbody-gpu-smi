@@ -92,26 +92,39 @@ struct Mat4
 };
 
 // ---------------- GLSL 着色器 ----------------
-// 顶点着色器：位置 → 裁剪空间，点大小随视距缩放
+// 顶点着色器：位置 → 裁剪空间，质量 log 归一化 → 点大小 + 传色
+// S5: 质量映射（蓝=轻，红=重；重者点更大）
 static const char* vertexShaderSrc = R"(
 #version 330 core
 layout(location = 0) in vec4 aPos;   // xyz + mass
 
 uniform mat4 uMVP;
 uniform float uPointScale;
+uniform float uMaxMass;              // 质量基准（log 归一化）
+uniform float uMinMass;              // 质量下限
+
+out float vMassNorm;                 // 归一化质量 [0,1]，传给片元
 
 void main()
 {
     gl_Position = uMVP * vec4(aPos.xyz, 1.0);
-    // 点大小随视距缩放（深度越大点越小）
-    gl_PointSize = uPointScale / max(1.0, -gl_Position.z);
+
+    // log 压缩归一化：大质量在小范围也能区分
+    float lmin = log(max(uMinMass, 1e-6));
+    float lmax = log(max(uMaxMass, lmin + 1e-6));
+    float lm   = log(max(aPos.w, 1e-6));
+    vMassNorm  = clamp((lm - lmin) / (lmax - lmin), 0.0, 1.0);
+
+    // 点大小 = 基准 × 质量系数 × 视距缩放
+    float sizeScale = 0.5 + 1.8 * vMassNorm;
+    gl_PointSize = uPointScale * sizeScale / max(1.0, -gl_Position.z);
 }
 )";
 
-// 片元着色器：圆形粒子（暖色）
+// 片元着色器：圆形粒子，质量决定颜色（蓝=轻 → 红=重）
 static const char* fragmentShaderSrc = R"(
 #version 330 core
-uniform vec4 uColor;
+in float vMassNorm;
 
 out vec4 fragColor;
 
@@ -121,7 +134,13 @@ void main()
     vec2 coord = gl_PointCoord - vec2(0.5);
     if (dot(coord, coord) > 0.25)
         discard;
-    fragColor = uColor;
+
+    // 蓝（轻）→ 青 → 黄 → 红（重）
+    vec3 lightColor = vec3(0.2, 0.5, 1.0);   // 蓝
+    vec3 heavyColor = vec3(1.0, 0.25, 0.1);  // 红
+    vec3 color      = mix(lightColor, heavyColor, vMassNorm);
+
+    fragColor = vec4(color, 1.0);
 }
 )";
 
@@ -170,7 +189,8 @@ ParticleRenderer::ParticleRenderer()
     , m_shader(0)
     , m_pbo(0)
     , m_numParticles(0)
-    , m_pointScale(80.0f)
+    , m_pointScale(50.0f)
+    , m_maxMass(1.0f)
 {
     buildShaders();
 
@@ -207,6 +227,11 @@ void ParticleRenderer::setPBO(unsigned int pbo, unsigned int numParticles)
     m_numParticles = numParticles;
 }
 
+void ParticleRenderer::setMaxMass(float maxMass)
+{
+    m_maxMass = maxMass;
+}
+
 void ParticleRenderer::render()
 {
     if (m_pbo == 0 || m_numParticles == 0) {
@@ -227,7 +252,8 @@ void ParticleRenderer::render()
 
     glUniformMatrix4fv(glGetUniformLocation(m_shader, "uMVP"), 1, GL_FALSE, mvp.m);
     glUniform1f(glGetUniformLocation(m_shader, "uPointScale"), m_pointScale);
-    glUniform4f(glGetUniformLocation(m_shader, "uColor"), 1.0f, 0.6f, 0.3f, 1.0f);
+    glUniform1f(glGetUniformLocation(m_shader, "uMaxMass"), m_maxMass);
+    glUniform1f(glGetUniformLocation(m_shader, "uMinMass"), 0.01f);
 
     // ---- 绑定 PBO 作为顶点数据源 ----
     glBindVertexArray(m_vao);
