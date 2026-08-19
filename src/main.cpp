@@ -2,6 +2,8 @@
 // S1: GLFW 窗口 + ImGui 面板
 // S3-1: CUDA-GL Interop 验证
 // S3-3: 物理(PBO) + 粒子渲染(VAO) 实时展示
+// S5: 质量映射（蓝=轻 → 红=重）
+// S6: 场景预设 + 质量模式选择（ImGui 控制）
 //
 // 基于 NVIDIA CUDA Samples 扩展（BSD-3-Clause）
 // Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
@@ -25,16 +27,15 @@
 #include "physics/body_system_cuda.h"
 #include "physics/cuda_check.h"
 #include "render/particle_renderer.h"
+#include "scene_generator.h"
 
 // 窗口尺寸
 constexpr int WINDOW_WIDTH  = 1280;
 constexpr int WINDOW_HEIGHT = 720;
 
-// 模拟参数（S3-3 固定值，S6/S7 会做成 ImGui 控件）
+// 模拟参数
 constexpr int   NUM_BODIES    = 16384;
 constexpr float TIMESTEP      = 0.016f;
-constexpr float CLUSTER_SCALE = 1.54f;
-constexpr float VELOCITY_SCALE = 8.0f;
 
 // GLFW 错误回调
 static void glfwErrorCallback(int error, const char* description)
@@ -100,54 +101,48 @@ int main()
     float clearColor[4] = { 0.05f, 0.05f, 0.08f, 1.0f };
 
     // --------------------------------
-    // 4. 创建物理系统（PBO 模式：位置由 InteropBuffer 提供）
-    //    必须在 GL 上下文创建后再构造（InteropBuffer 需要 GL context 建 PBO）
+    // 4. 创建物理系统（PBO 模式）
     // --------------------------------
     BodySystemCUDA<float> system(NUM_BODIES, 256, /*usePBO=*/true);
     system.setSoftening(0.00125f);
     system.setDamping(0.995f);
 
-    // 生成初始场景（壳层分布，视觉更像"星群"）
-    srand(42);
+    // 场景配置（S6：UI 可切换）
+    SceneConfig cfg;
+    cfg.scene     = SceneType::RANDOM_CLOUD;
+    cfg.massMode  = MassMode::CENTRAL_BODY;
+    cfg.numBodies = NUM_BODIES;
+
+    // 场景数据缓冲
     std::vector<float> hPos(NUM_BODIES * 4);
     std::vector<float> hVel(NUM_BODIES * 4);
-    std::vector<float> hColor(NUM_BODIES * 4);
-
-    randomizeBodies(NBODY_CONFIG_SHELL,
-                    hPos.data(),
-                    hVel.data(),
-                    hColor.data(),
-                    CLUSTER_SCALE,
-                    VELOCITY_SCALE,
-                    NUM_BODIES,
-                    true);
-
-    // ---- S5: 非均匀质量（核心物理风格）----
-    // 前 1% 粒子设为"大质量体"，其余保持小质量
-    // 质量存在每个粒子的 float4.w，物理解算直接使用
-    const int numHeavy = NUM_BODIES / 100;
-    float     maxMass  = 1.0f;
-    for (int i = 0; i < NUM_BODIES; ++i) {
-        if (i < numHeavy) {
-            hPos[i * 4 + 3] = 100.0f + 100.0f * (float)i / numHeavy;  // 100 ~ 200
-            maxMass = hPos[i * 4 + 3];
-        }
-    }
-
-    system.setArray(BODYSYSTEM_POSITION, hPos.data());
-    system.setArray(BODYSYSTEM_VELOCITY, hVel.data());
+    float              maxMass = 1.0f;
 
     // --------------------------------
-    // 5. 创建粒子渲染器（绑定 CUDA 写好的 PBO + 质量映射）
+    // 5. 创建粒子渲染器
     // --------------------------------
     ParticleRenderer renderer;
     renderer.setPBO(system.getCurrentReadPBO(), system.getNumBodies());
     renderer.setMaxMass(maxMass);
-    printf("[S5] 质量范围: 1.0 ~ %.1f（%d 个大质量体）\n", maxMass, numHeavy);
 
     // 运行状态
     bool  paused  = false;
     float simTime = 0.0f;
+
+    // ---- 场景重置函数（切换到新场景/质量模式时调用）----
+    auto resetScene = [&]() {
+        srand(42);
+        maxMass = generateScene(cfg, hPos, hVel);
+        system.setArray(BODYSYSTEM_POSITION, hPos.data());
+        system.setArray(BODYSYSTEM_VELOCITY, hVel.data());
+        renderer.setMaxMass(maxMass);
+        renderer.setPBO(system.getCurrentReadPBO(), system.getNumBodies());
+        simTime = 0.0f;
+        printf("[S6] 场景: %s, 质量: %s, maxMass=%.1f\n", sceneName(cfg.scene), massModeName(cfg.massMode), maxMass);
+    };
+
+    // 初始场景
+    resetScene();
 
     printf("[S3-3] 启动: %d 粒子, PBO 渲染模式\n", NUM_BODIES);
 
@@ -161,7 +156,6 @@ int main()
         if (!paused) {
             system.update(TIMESTEP);
             simTime += TIMESTEP;
-            // 双缓冲翻转后，渲染当前读缓冲
             renderer.setPBO(system.getCurrentReadPBO(), system.getNumBodies());
         }
 
@@ -171,14 +165,36 @@ int main()
         ImGui::NewFrame();
 
         ImGui::Begin("N-Body Simulator");
-        ImGui::Text("Welcome to N-Body GPU Simulator");
-        ImGui::Separator();
 
-        ImGui::Text("S3-3: 实时粒子渲染");
+        // ---- S6: 场景与质量模式选择 ----
+        ImGui::Text("场景预设:");
+        int selScene = (int)cfg.scene;
+        if (ImGui::Combo("##scene", &selScene,
+                         "随机粒子云\0双粒子互绕\0格点扰动\0双星系统\0旋转星系盘\0太阳系\0")) {
+            cfg.scene = (SceneType)selScene;
+        }
+
+        ImGui::Text("质量模式:");
+        int selMass = (int)cfg.massMode;
+        if (ImGui::Combo("##mass", &selMass, "均匀\0随机分布\0中心天体\0")) {
+            cfg.massMode = (MassMode)selMass;
+        }
+
+        if (ImGui::Button("应用并重置场景")) {
+            resetScene();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("重置（同场景）")) {
+            paused = false;
+            resetScene();
+        }
+
+        ImGui::Separator();
+        ImGui::Text("当前: %s / %s", sceneName(cfg.scene), massModeName(cfg.massMode));
         ImGui::BulletText("粒子数: %u", system.getNumBodies());
         ImGui::BulletText("模拟时间: %.2f s", simTime);
+        ImGui::BulletText("质量范围: 1.0 ~ %.1f", maxMass);
         ImGui::BulletText("PBO 渲染: %s", system.usesPBO() ? "ON" : "OFF");
-        ImGui::BulletText("S5 质量映射: 蓝(轻) → 红(重)");
         ImGui::BulletText("状态: %s", paused ? "暂停(空格继续)" : "运行中(空格暂停)");
         ImGui::Separator();
 
@@ -187,7 +203,7 @@ int main()
 
         ImGui::End();
 
-        // ---- 键盘：空格暂停/继续（ImGui 不捕获键盘时生效）----
+        // ---- 键盘：空格暂停/继续 ----
         if (ImGui::IsKeyPressed(ImGuiKey_Space) && !io.WantCaptureKeyboard) {
             paused = !paused;
         }
@@ -214,7 +230,7 @@ int main()
     }
 
     // --------------------------------
-    // 7. 清理（system 析构自动释放 PBO/显存）
+    // 7. 清理
     // --------------------------------
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
