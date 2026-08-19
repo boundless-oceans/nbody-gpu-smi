@@ -12,6 +12,10 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
 endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CUDA_SEPARABLE_COMPILATION OFF)
+
+# CUDA Toolkit（提供 CUDA::cudart 等 targets）
+find_package(CUDAToolkit REQUIRED)
 
 # ======================================================
 # 依赖检查：OpenGL（系统自带，一般都有）
@@ -69,10 +73,24 @@ else()
 endif()
 
 # ======================================================
-# 可执行文件
+# 物理模块源（CUDA 内核 + 头文件）
+# ======================================================
+set(PHYSICS_SOURCES
+    src/physics/body_system_cuda_kernel.cu
+)
+
+set(PHYSICS_INCLUDE_DIRS
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+# ======================================================
+# GUI 可执行文件（S1 工程骨架 + S3-1 Interop 验证）
 # ======================================================
 add_executable(nbody
     src/main.cpp
+    src/render/interop_buffer.cpp       # S3-1: CUDA-GL Interop 缓冲
+    src/render/particle_renderer.cpp    # S3-3: 粒子渲染器
+    ${PHYSICS_SOURCES}                  # S3-3: 物理内核（integrateBodies）
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_demo.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
@@ -85,6 +103,8 @@ add_executable(nbody
 target_include_directories(nbody PRIVATE
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
+    ${PHYSICS_INCLUDE_DIRS}
+    ${CUDAToolkit_INCLUDE_DIRS}         # .cpp 编译需显式 CUDA 头文件路径
 )
 
 # 编译选项
@@ -98,6 +118,36 @@ target_compile_options(nbody PRIVATE
 
 # 链接
 target_link_libraries(nbody PRIVATE
+    OpenGL::GL
+    GLEW::GLEW
+    ${GLFW_LIBS}
+    CUDA::cudart                        # S3-1: CUDA Runtime API
+)
+
+# ======================================================
+# Benchmark 可执行文件
+# S2: 无窗口物理性能基准
+# S3-2: --pbo 模式（经隐藏 GL 上下文创建 InteropBuffer）
+# 用法: ./nbody_benchmark [numBodies] [iterations] [--pbo]
+# ======================================================
+add_executable(nbody_benchmark
+    src/benchmark.cpp
+    src/render/interop_buffer.cpp       # S3-2: PBO 模式经 InteropBuffer
+    ${PHYSICS_SOURCES}
+)
+
+target_include_directories(nbody_benchmark PRIVATE
+    ${PHYSICS_INCLUDE_DIRS}
+    ${CUDAToolkit_INCLUDE_DIRS}         # .cpp 编译需显式 CUDA 头文件路径
+)
+
+target_compile_options(nbody_benchmark PRIVATE
+    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra>
+)
+
+# S3-2: PBO 模式需要 GL 上下文（隐藏 GLFW 窗口 + GLEW + OpenGL）
+target_link_libraries(nbody_benchmark PRIVATE
+    CUDA::cudart
     OpenGL::GL
     GLEW::GLEW
     ${GLFW_LIBS}
