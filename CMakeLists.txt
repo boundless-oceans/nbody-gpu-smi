@@ -89,6 +89,8 @@ set(PHYSICS_INCLUDE_DIRS
 add_executable(nbody
     src/main.cpp
     src/render/interop_buffer.cpp       # S3-1: CUDA-GL Interop 缓冲
+    src/render/particle_renderer.cpp    # S3-3: 粒子渲染器
+    ${PHYSICS_SOURCES}                  # S3-3: 物理内核（integrateBodies）
     ${IMGUI_DIR}/imgui.cpp
     ${IMGUI_DIR}/imgui_demo.cpp
     ${IMGUI_DIR}/imgui_draw.cpp
