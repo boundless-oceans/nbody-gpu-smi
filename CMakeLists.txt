@@ -14,6 +14,9 @@ endif()
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_CUDA_SEPARABLE_COMPILATION OFF)
 
+# 可执行文件输出到项目根目录（与 NVIDIA 官方仓库一致：./nbody）
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # CUDA Toolkit（提供 CUDA::cudart 等 targets）
 find_package(CUDAToolkit REQUIRED)
 

@@ -14,8 +14,9 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_DIR/build"
-GUI_BINARY="$BUILD_DIR/nbody"
-BENCH_BINARY="$BUILD_DIR/nbody_benchmark"
+# 可执行文件输出在项目根目录（与 NVIDIA 官方仓库一致）
+GUI_BINARY="$PROJECT_DIR/nbody"
+BENCH_BINARY="$PROJECT_DIR/nbody_benchmark"
 
 # 解析参数
 MODE="gui"
