@@ -1,6 +1,7 @@
 // N-Body GPU Simulator
-// S1: GLFW 窗口 + Dear ImGui 控制面板
-// S3-1: CUDA-GL Interop 验证（PBO 注册 + CUDA 写 / GL 读回）
+// S1: GLFW 窗口 + ImGui 面板
+// S3-1: CUDA-GL Interop 验证
+// S3-3: 物理(PBO) + 粒子渲染(VAO) 实时展示
 //
 // 基于 NVIDIA CUDA Samples 扩展（BSD-3-Clause）
 // Copyright (c) 2022, NVIDIA CORPORATION. All rights reserved.
@@ -20,15 +21,20 @@
 #include <string>
 #include <vector>
 
-#include "render/interop_buffer.h"
+#include "physics/body_system.h"
+#include "physics/body_system_cuda.h"
 #include "physics/cuda_check.h"
+#include "render/particle_renderer.h"
 
 // 窗口尺寸
 constexpr int WINDOW_WIDTH  = 1280;
 constexpr int WINDOW_HEIGHT = 720;
 
-// S3-1 测试粒子数（非最终模拟 N，仅验证 interop 链路）
-constexpr int TEST_NUM_PARTICLES = 1024;
+// 模拟参数（S3-3 固定值，S6/S7 会做成 ImGui 控件）
+constexpr int   NUM_BODIES    = 16384;
+constexpr float TIMESTEP      = 0.016f;
+constexpr float CLUSTER_SCALE = 1.54f;
+constexpr float VELOCITY_SCALE = 8.0f;
 
 // GLFW 错误回调
 static void glfwErrorCallback(int error, const char* description)
@@ -62,7 +68,7 @@ int main()
     glfwSwapInterval(1);  // 垂直同步
 
     // --------------------------------
-    // 2. 初始化 GLEW（OpenGL 扩展加载）
+    // 2. 初始化 GLEW
     // --------------------------------
     glewExperimental = GL_TRUE;
     GLenum err = glewInit();
@@ -72,6 +78,9 @@ int main()
         glfwTerminate();
         return -1;
     }
+
+    // 开启深度测试
+    glEnable(GL_DEPTH_TEST);
 
     // --------------------------------
     // 3. 初始化 Dear ImGui
@@ -91,114 +100,94 @@ int main()
     float clearColor[4] = { 0.05f, 0.05f, 0.08f, 1.0f };
 
     // --------------------------------
-    // 4. S3-1: CUDA-GL Interop 验证
-    //    PBO → 注册 CUDA → CUDA 写 → GL 读回 → 对比
+    // 4. 创建物理系统（PBO 模式：位置由 InteropBuffer 提供）
+    //    必须在 GL 上下文创建后再构造（InteropBuffer 需要 GL context 建 PBO）
     // --------------------------------
-    bool interopOK = false;
-    std::string interopMsg = "未测试";
+    BodySystemCUDA<float> system(NUM_BODIES, 256, /*usePBO=*/true);
+    system.setSoftening(0.00125f);
+    system.setDamping(0.995f);
 
-    {
-        // 4.1 创建 interop 缓冲（每粒子 4×float = xyz + mass）
-        InteropBuffer buffer(TEST_NUM_PARTICLES, 4 * sizeof(float));
+    // 生成初始场景（壳层分布，视觉更像"星群"）
+    srand(42);
+    std::vector<float> hPos(NUM_BODIES * 4);
+    std::vector<float> hVel(NUM_BODIES * 4);
+    std::vector<float> hColor(NUM_BODIES * 4);
 
-        // 4.2 构造模式数据（CUDA 侧通过 mapped pointer 写入）
-        std::vector<float> writeData(TEST_NUM_PARTICLES * 4);
-        for (int i = 0; i < TEST_NUM_PARTICLES; ++i) {
-            writeData[i * 4 + 0] = (float)i;          // x = 索引
-            writeData[i * 4 + 1] = (float)(i * 2);    // y
-            writeData[i * 4 + 2] = (float)(i * 3);    // z
-            writeData[i * 4 + 3] = 1.0f;              // mass
-        }
+    randomizeBodies(NBODY_CONFIG_SHELL,
+                    hPos.data(),
+                    hVel.data(),
+                    hColor.data(),
+                    CLUSTER_SCALE,
+                    VELOCITY_SCALE,
+                    NUM_BODIES,
+                    true);
 
-        // 4.3 CUDA 锁定 PBO 并写数据
-        cudaGraphicsResource* res = buffer.mapForCuda();
-        {
-            size_t bytes            = 0;
-            void*  mappedPtr        = nullptr;
-            CHECK_CUDA(cudaGraphicsResourceGetMappedPointer(&mappedPtr, &bytes, res));
-            CHECK_CUDA(cudaMemcpy(mappedPtr, writeData.data(), bytes, cudaMemcpyHostToDevice));
-            CHECK_CUDA(cudaDeviceSynchronize());
-        }
-        buffer.unmapFromCuda();
-
-        // 4.4 OpenGL 读回 PBO 内容（此刻应能读到 CUDA 写入的数据）
-        std::vector<float> readData(TEST_NUM_PARTICLES * 4, 0.0f);
-        glBindBuffer(GL_ARRAY_BUFFER, buffer.getPBO());
-        void* glPtr = glMapBuffer(GL_ARRAY_BUFFER, GL_READ_ONLY);
-        if (glPtr) {
-            std::memcpy(readData.data(), glPtr, TEST_NUM_PARTICLES * 4 * sizeof(float));
-            glUnmapBuffer(GL_ARRAY_BUFFER);
-        }
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-
-        // 4.5 对比 CUDA 写入与 GL 读回的数据
-        bool match = (glPtr != nullptr);
-        if (match) {
-            for (int i = 0; i < TEST_NUM_PARTICLES * 4; ++i) {
-                if (readData[i] != writeData[i]) {
-                    match = false;
-                    break;
-                }
-            }
-        }
-
-        interopOK = match;
-        interopMsg = match ? "PASS" : "FAIL";
-        std::printf("[S3-1] CUDA-GL Interop 验证: %s\n", match ? "PASS" : "FAIL");
-        if (!match) {
-            std::fprintf(stderr, "[S3-1] 数据对比失败（CUDA 写入 vs GL 读回）\n");
-        }
-    }
+    system.setArray(BODYSYSTEM_POSITION, hPos.data());
+    system.setArray(BODYSYSTEM_VELOCITY, hVel.data());
 
     // --------------------------------
-    // 5. 主循环
+    // 5. 创建粒子渲染器（绑定 CUDA 写好的 PBO）
+    // --------------------------------
+    ParticleRenderer renderer;
+    renderer.setPBO(system.getCurrentReadPBO(), system.getNumBodies());
+
+    // 运行状态
+    bool  paused  = false;
+    float simTime = 0.0f;
+
+    printf("[S3-3] 启动: %d 粒子, PBO 渲染模式\n", NUM_BODIES);
+
+    // --------------------------------
+    // 6. 主循环
     // --------------------------------
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
-        // 开始 ImGui 帧
+        // ---- 物理模拟（PBO 模式内部 map/unmap + 内核计算）----
+        if (!paused) {
+            system.update(TIMESTEP);
+            simTime += TIMESTEP;
+            // 双缓冲翻转后，渲染当前读缓冲
+            renderer.setPBO(system.getCurrentReadPBO(), system.getNumBodies());
+        }
+
+        // ---- ImGui 帧 ----
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // ---- 控制面板 ----
         ImGui::Begin("N-Body Simulator");
-
         ImGui::Text("Welcome to N-Body GPU Simulator");
         ImGui::Separator();
 
-        ImGui::Text("S3-1: CUDA-GL Interop");
-        ImGui::BulletText("PBO 粒子数: %d", TEST_NUM_PARTICLES);
-        ImGui::BulletText("状态: %s", interopMsg.c_str());
-        if (interopOK) {
-            ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "CUDA 写入 → GL 读回 数据一致，Interop 链路打通");
-        }
-        else {
-            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Interop 验证失败，请查看终端输出");
-        }
+        ImGui::Text("S3-3: 实时粒子渲染");
+        ImGui::BulletText("粒子数: %u", system.getNumBodies());
+        ImGui::BulletText("模拟时间: %.2f s", simTime);
+        ImGui::BulletText("PBO 渲染: %s", system.usesPBO() ? "ON" : "OFF");
+        ImGui::BulletText("状态: %s", paused ? "暂停(空格继续)" : "运行中(空格暂停)");
         ImGui::Separator();
-
-        ImGui::Text("S1: 工程骨架（占位）");
-        ImGui::TextWrapped(
-            "后续将在此添加：\n"
-            "  - N 滑条（粒子数）\n"
-            "  - 质量模式选择\n"
-            "  - 预设场景按钮\n"
-            "  - 运行控制（开始/暂停/单步/重置）\n"
-            "  - FPS 显示");
 
         ImGui::Text("Application average %.3f ms/frame (%.1f FPS)",
                     1000.0f / io.Framerate, io.Framerate);
 
         ImGui::End();
 
-        // 渲染
+        // ---- 键盘：空格暂停/继续（ImGui 不捕获键盘时生效）----
+        if (ImGui::IsKeyPressed(ImGuiKey_Space) && !io.WantCaptureKeyboard) {
+            paused = !paused;
+        }
+
+        // ---- 渲染 ----
         ImGui::Render();
+
         int displayW, displayH;
         glfwGetFramebufferSize(window, &displayW, &displayH);
         glViewport(0, 0, displayW, displayH);
         glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        // 先渲染粒子（带深度），再渲染 ImGui 叠加
+        renderer.render();
 
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
@@ -210,7 +199,7 @@ int main()
     }
 
     // --------------------------------
-    // 6. 清理
+    // 7. 清理（system 析构自动释放 PBO/显存）
     // --------------------------------
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
